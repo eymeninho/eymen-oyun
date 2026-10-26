@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neon Spark: Cyber Dash ⚡</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#0b0614;color:white;
+ font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;text-align:center;
+ overflow-x:hidden;
+}
+h1{color:#00f3ff;text-shadow:0 0 20px #00f3ff, 0 0 40px rgba(0,243,255,0.5);margin:10px 0;}
+#hud{display:flex;justify-content:center;gap:15px;flex-wrap:wrap;margin-bottom:5px;}
+#hud span{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);padding:8px 16px;border-radius:12px;font-weight:bold;backdrop-filter:blur(5px);}
+canvas{
+ display:block;width:96%;max-width:800px;height:auto;
+ margin:10px auto;border:3px solid #00f3ff;
+ border-radius:16px;background:#120a22;
+ box-shadow:0 0 30px rgba(0,243,255,0.3);
+}
+.controls{display:flex;justify-content:center;gap:10px;margin-top:10px;}
+button{
+ padding:14px 22px;border:0;border-radius:14px;
+ background:linear-gradient(135deg, #00f3ff, #0066ff);color:#0b0614;font-size:18px;
+ font-weight:bold;cursor:pointer;touch-action:none;
+ box-shadow:0 4px 15px rgba(0,243,255,0.4);
+ transition:transform 0.1s;
+}
+button:active{transform:scale(0.95);}
+#reset{background:linear-gradient(135deg, #ff007f, #ff5500);color:white;box-shadow:0 4px 15px rgba(255,0,127,0.4);}
+#msg{min-height:26px;color:#00f3ff;font-weight:bold;margin-top:8px;font-size:16px;text-shadow:0 0 10px rgba(0,243,255,0.4);}
+</style>
+</head>
+<body>
+<h1>⚡ NEON SPARK</h1>
+<div id="hud">
+ <span>💎 Enerji: <b id="score">0</b></span>
+ <span>❤️ Can: <b id="life">3</b></span>
+ <span>🛡️ Kalkan: <b id="shieldText">Yok</b></span>
+</div>
+<canvas id="game" width="800" height="420"></canvas>
+<div class="controls">
+ <button id="left">⬅️ SOL</button>
+ <button id="jump">⬆️ ZIPLA</button>
+ <button id="right">SAĞ ➡️</button>
+ <button id="reset">🔄 YENİDEN</button>
+</div>
+<p id="msg">Neon küreleri topla, enerji havuzlarından kaç!</p>
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const $=id=>document.getElementById(id);
+
+let keys={},score=0,life=3,frame=0,finished=false,shieldActive=false,shieldTimer=0,speedBoost=false,speedTimer=0;
+const p={x:50,y:300,w:26,h:36,vx:0,vy:0,ground:false};
+const floor=365;
+let gems=[],lava=[],platforms=[],powerups=[];
+
+function init(){
+ p.x=50;p.y=300;p.vx=0;p.vy=0;
+ score=0;life=3;frame=0;finished=false;
+ shieldActive=false;shieldTimer=0;speedBoost=false;speedTimer=0;
+ 
+ gems=[
+  {x:160,y:290,got:false},{x:280,y:230,got:false},
+  {x:420,y:280,got:false},{x:550,y:210,got:false},
+  {x:680,y:270,got:false},{x:745,y:310,got:false}
+ ];
+ lava=[
+  {x:180,w:70,phase:0},
+  {x:380,w:90,phase:2},
+  {x:580,w:80,phase:4}
+ ];
+ platforms=[
+  {x:0,y:floor,w:800,h:55,move:false},
+  {x:120,y:315,w:90,h:14,move:false},
+  {x:240,y:260,w:100,h:14,move:true,dir:1,minX:200,maxX:340},
+  {x:370,y:315,w:100,h:14,move:false},
+  {x:510,y:240,w:100,h:14,move:true,dir:-1,minX:480,maxX:620},
+  {x:640,y:310,w:110,h:14,move:false}
+ ];
+ powerups=[
+  {x:285,y:220,type:'shield',got:false},
+  {x:550,y:190,type:'speed',got:false}
+ ];
+ updateHUD();
+ $("msg").textContent="Neon küreleri topla, enerji havuzlarından kaç!";
+}
+
+function updateHUD(){
+ $("score").textContent=score;
+ $("life").textContent=life;
+ $("shieldText").textContent=shieldActive ? "Aktif ("+Math.ceil(shieldTimer/60)+"s)" : "Yok";
+}
+
+function jump(){
+ if(p.ground&&!finished){p.vy=-12;p.ground=false}
+}
+
+document.addEventListener("keydown",e=>{
+ keys[e.code]=true;
+ if(["Space","ArrowUp"].includes(e.code)){e.preventDefault();jump()}
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+
+function bind(id,key){
+ const b=$(id);
+ if(!b) return;
+ b.addEventListener("pointerdown",e=>{
+  e.preventDefault();keys[key]=true;
+  if(b.setPointerCapture) b.setPointerCapture(e.pointerId);
+  if(key==="Space")jump();
+ });
+ ["pointerup","pointercancel","lostpointercapture"].forEach(ev=>
+ b.addEventListener(ev,()=>keys[key]=false));
+}
+bind("left","ArrowLeft");
+bind("right","ArrowRight");
+bind("jump","Space");
+$("reset").onclick=init;
+
+function overlap(a,b){
+ return a.x<b.x+b.w&&a.x+a.w>b.x&&
+ a.y<b.y+b.h&&a.y+a.h>b.y;
+}
+
+function damage(){
+ if(shieldActive){
+  shieldActive=false;
+  shieldTimer=0;
+  $("msg").textContent="🛡️ Kalkanın saldırıyı engelledi!";
+  updateHUD();
+  return;
+ }
+ life--;updateHUD();
+ if(life<=0){
+  finished=true;
+  $("msg").textContent="💥 Enerji bitti! Tekrar dene!";
+ }else{
+  p.x=45;p.y=290;p.vy=0;
+  $("msg").textContent="Dikkat! Enerji sızıntısı yaktı! ❤️";
+ }
+}
+
+function update(){
+ if(finished)return;
+ frame++;
+
+ if(shieldActive){
+  shieldTimer--;
+  if(shieldTimer<=0) shieldActive=false;
+  updateHUD();
+ }
+ if(speedBoost){
+  speedTimer--;
+  if(speedTimer<=0) speedBoost=false;
+ }
+
+ let speed=speedBoost?7:4.5;
+ p.vx=0;
+ if(keys.ArrowLeft||keys.KeyA||keys.KeyLeft)p.vx=-speed;
+ if(keys.ArrowRight||keys.KeyD||keys.KeyRight)p.vx=speed;
+ p.x=Math.max(0,Math.min(774,p.x+p.vx));
+
+ let old=p.y;
+ p.vy=Math.min(12,p.vy+.5);
+ p.y+=p.vy;p.ground=false;
+
+ // Hareketli platformlar güncellemesi
+ for(const a of platforms){
+  if(a.move){
+   a.x+=a.dir*1.2;
+   if(a.x<a.minX||a.x>a.maxX)a.dir*=-1;
+  }
+  if(p.vy>=0&&p.x+p.w>a.x&&p.x<a.x+a.w&&
+  old+p.h<=a.y+3&&p.y+p.h>=a.y){
+   p.y=a.y-p.h;p.vy=0;p.ground=true;
+   if(a.move) p.x+=a.dir*1.2;
+  }
+ }
+
+ // Küre toplama
+ for(const g of gems){
+  if(!g.got&&overlap(p,{x:g.x-10,y:g.y-10,w:20,h:20})){
+   g.got=true;score+=10;updateHUD();
+  }
+ }
+
+ // Güçlendirmeler
+ for(const pw of powerups){
+  if(!pw.got&&overlap(p,{x:pw.x-12,y:pw.y-12,w:24,h:24})){
+   pw.got=true;
+   if(pw.type==='shield'){
+    shieldActive=true;shieldTimer=300;
+    $("msg").textContent="🛡️ Kalkan Gücü Alındı!";
+   } else if(pw.type==='speed'){
+    speedBoost=true;speedTimer=300;
+    $("msg").textContent="🚀 Süper Hız Aktif!";
+   }
+   updateHUD();
+  }
+ }
+
+ // Tehlike
+ for(const l of lava){
+  let hot=Math.sin(frame*.08+l.phase)>-.2;
+  if(hot&&overlap(p,{x:l.x,y:floor-8,w:l.w,h:8})){
+   damage();break;
+  }
+ }
+
+ if(p.y>450)damage();
+
+ if(p.x>760){
+  finished=true;
+  $("msg").textContent="🏆 Tebrikler! Cyber World'ü fethettin!";
+ }
+}
+
+function draw(){
+ ctx.fillStyle="#120a22";ctx.fillRect(0,0,800,420);
+
+ ctx.strokeStyle="rgba(0,243,255,0.05)";
+ ctx.lineWidth=1;
+ for(let i=0;i<800;i+=40){
+  ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,420);ctx.stroke();
+ }
+ for(let i=0;i<420;i+=40){
+  ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(800,i);ctx.stroke();
+ }
+
+ for(const l of lava){
+  ctx.fillStyle="rgba(255,0,127,0.3)";
+  ctx.fillRect(l.x,358,l.w,62);
+  ctx.fillStyle="#ff007f";
+  ctx.fillRect(l.x,360+Math.sin(frame*.1+l.phase)*5,l.w,8);
+  for(let i=0;i<3;i++){
+   ctx.fillStyle="#00f3ff";
+   ctx.beginPath();
+   ctx.arc(l.x+12+i*(l.w-24)/2, 368+Math.sin(frame*.15+i+l.phase)*6,3,0,7);
+   ctx.fill();
+  }
+ }
+
+ for(const a of platforms){
+  ctx.fillStyle="#1d1235";ctx.fillRect(a.x,a.y,a.w,a.h);
+  ctx.strokeStyle="#00f3ff";ctx.lineWidth=2;
+  ctx.strokeRect(a.x,a.y,a.w,a.h);
+ }
+
+ for(const pw of powerups){
+  if(pw.got)continue;
+  let floatY=Math.sin(frame*.1)*4;
+  ctx.save();
+  ctx.translate(pw.x,pw.y+floatY);
+  ctx.fillStyle=pw.type==='shield'?"#00ff66":"#ffcc00";
+  ctx.beginPath();ctx.arc(0,0,10,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#120a22";
+  ctx.font="bold 11px Arial";ctx.textAlign="center";
+  ctx.fillText(pw.type==='shield'?"🛡️":"⚡",0,4);
+  ctx.restore();
+ }
+
+ for(const g of gems){
+  if(g.got)continue;
+  let bob=Math.sin(frame*.1+g.x)*5;
+  ctx.save();ctx.translate(g.x,g.y+bob);ctx.rotate(frame*0.05);
+  ctx.fillStyle="#00f3ff";ctx.fillRect(-7,-7,14,14);
+  ctx.fillStyle="#ffffff";ctx.fillRect(-3,-3,6,6);
+  ctx.restore();
+ }
+
+ ctx.save();
+ if(shieldActive){
+  ctx.strokeStyle="#00ff66";ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(p.x+p.w/2,p.y+p.h/2,26,0,Math.PI*2);ctx.stroke();
+ }
+ ctx.fillStyle=speedBoost?"#ffcc00":"#00f3ff";
+ ctx.beginPath();
+ if(ctx.roundRect) {
+  ctx.roundRect(p.x,p.y,p.w,p.h,[8]);
+ } else {
+  ctx.rect(p.x,p.y,p.w,p.h);
+ }
+ ctx.fill();
+
+ ctx.fillStyle="#120a22";
+ ctx.fillRect(p.x+5,p.y+10,4,6);
+ ctx.fillRect(p.x+17,p.y+10,4,6);
+ ctx.restore();
+
+ ctx.fillStyle="#00f3ff";ctx.fillRect(768,270,6,95);
+ ctx.fillStyle="rgba(0,243,255,0.2)";ctx.fillRect(748,270,20,95);
+ ctx.fillStyle="#ffffff";ctx.font="bold 11px Arial";
+ ctx.fillText("PORTAL",738,255);
+
+ if(finished){
+  ctx.fillStyle="rgba(11,6,20,0.9)";ctx.fillRect(0,0,800,420);
+  ctx.textAlign="center";
+  ctx.fillStyle="#00f3ff";ctx.font="bold 38px Arial";
+  ctx.fillText(life<=0?"GAME OVER":"VICTORY!",400,180);
+  ctx.fillStyle="white";ctx.font="22px Arial";
+  ctx.fillText("💎 Toplam Puan: "+score,400,230);
+  ctx.font="16px Arial";
+  ctx.fillText("Yeniden oynamak için 🔄 butonuna tıkla",400,270);
+  ctx.textAlign="left";
+ }
+}
+
+function loop(){update();draw();requestAnimationFrame(loop)}
+init();loop();
+</script>
+</body>
+</html>
